@@ -12,8 +12,10 @@ from typing import List, Dict, Callable, Any, Union, Tuple
 from mmdet.structures import DetDataSample
 import os
 
-config_path = os.path.join(os.path.dirname(__file__), 'configs/rtmdet/rtmdet-ins_tiny_8xb32-300e_coco.py')
-checkpoint_path = os.path.join(os.path.dirname(__file__), 'checkpoints/rtmdet-ins_tiny_8xb32-300e_coco_20221130_151727-ec670f7e.pth')
+model_name = 'rtmdet-ins_tiny_8xb32-300e_coco'
+
+config_path = os.path.join(os.path.dirname(__file__), f'configs/rtmdet/{model_name}.py')
+checkpoint_path = os.path.join(os.path.dirname(__file__), f'checkpoints/{model_name}.pth')
 device = 'cuda:0'
 
 # build the model from a config file and a checkpoint file
@@ -126,7 +128,7 @@ async def async_get_recognition(image: np.ndarray,
     return await loop.run_in_executor(executor, get_recognition, image, filter_objects, score_threshold, top_k)
 
 
-def draw_recognition(image: np.ndarray, result: Dict[str, Any],
+async def async_draw_recognition(image: np.ndarray, result: Dict[str, Any],
                      black: bool = False, draw_contour: bool = False, draw_mask: bool = True, 
                      draw_box: bool = False, draw_text: bool = True, draw_score = True,
                      alpha: float = 0.45) -> np.ndarray:
@@ -154,6 +156,9 @@ def draw_recognition(image: np.ndarray, result: Dict[str, Any],
         color_list.append(color)
         colors.append(np.array(color, dtype=float).reshape(1,1,1,3))
     colors = np.concatenate(colors, axis=0)
+
+    # yield to other tasks
+    await asyncio.sleep(0)
     
     if draw_mask:
         # masks N*H*W
@@ -174,6 +179,9 @@ def draw_recognition(image: np.ndarray, result: Dict[str, Any],
         image = image * inv_alpha_masks.prod(axis=0) + masks_color_summand
         image = image.astype(np.uint8)
 
+    # yield to other tasks
+    await asyncio.sleep(0)
+
     # draw the contours
     if draw_contour:
         for i, contour in enumerate(mask_contours):
@@ -181,12 +189,18 @@ def draw_recognition(image: np.ndarray, result: Dict[str, Any],
             color = color_list[i]
             cv2.drawContours(image, [contour], -1, color, 2)
 
+    # yield to other tasks
+    await asyncio.sleep(0)
+
     # draw box
     if draw_box:
         for i, box in enumerate(boxes):
             x1, y1, x2, y2 = box
             color = color_list[i]
             cv2.rectangle(image, (x1, y1), (x2, y2), color, 1)
+
+    # yield to other tasks
+    await asyncio.sleep(0)
 
     # place text at the center
     if draw_text:
