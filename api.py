@@ -10,9 +10,10 @@ from concurrent.futures import ThreadPoolExecutor
 
 from typing import List, Dict, Callable, Any, Union, Tuple
 from mmdet.structures import DetDataSample
+import os
 
-config_path = 'configs/rtmdet/rtmdet-ins_tiny_8xb32-300e_coco.py'
-checkpoint_path = 'checkpoints/rtmdet-ins_tiny_8xb32-300e_coco_20221130_151727-ec670f7e.pth'
+config_path = os.path.join(os.path.dirname(__file__), 'configs/rtmdet/rtmdet-ins_tiny_8xb32-300e_coco.py')
+checkpoint_path = os.path.join(os.path.dirname(__file__), 'checkpoints/rtmdet-ins_tiny_8xb32-300e_coco_20221130_151727-ec670f7e.pth')
 device = 'cuda:0'
 
 # build the model from a config file and a checkpoint file
@@ -117,7 +118,7 @@ def get_recognition(image: np.ndarray,
     return result
 
 
-async def get_recognition_async(image: np.ndarray,
+async def async_get_recognition(image: np.ndarray,
                                 filter_objects: List[str] = [],
                                 score_threshold: float = 0.3,
                                 top_k: int = 15) -> Dict[str, Any]:
