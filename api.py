@@ -128,7 +128,7 @@ async def async_get_recognition(image: np.ndarray,
     return await loop.run_in_executor(executor, get_recognition, image, filter_objects, score_threshold, top_k)
 
 
-async def async_draw_recognition(image: np.ndarray, result: Dict[str, Any],
+def async_draw_recognition(image: np.ndarray, result: Dict[str, Any],
                      black: bool = False, draw_contour: bool = False, draw_mask: bool = True, 
                      draw_box: bool = False, draw_text: bool = True, draw_score = True,
                      alpha: float = 0.45) -> np.ndarray:
@@ -158,7 +158,7 @@ async def async_draw_recognition(image: np.ndarray, result: Dict[str, Any],
     colors = np.concatenate(colors, axis=0)
 
     # yield to other tasks
-    await asyncio.sleep(0)
+    # await asyncio.sleep(0)
     
     if draw_mask:
         # masks N*H*W
@@ -180,7 +180,7 @@ async def async_draw_recognition(image: np.ndarray, result: Dict[str, Any],
         image = image.astype(np.uint8)
 
     # yield to other tasks
-    await asyncio.sleep(0)
+    # await asyncio.sleep(0)
 
     # draw the contours
     if draw_contour:
@@ -190,7 +190,7 @@ async def async_draw_recognition(image: np.ndarray, result: Dict[str, Any],
             cv2.drawContours(image, [contour], -1, color, 2)
 
     # yield to other tasks
-    await asyncio.sleep(0)
+    # await asyncio.sleep(0)
 
     # draw box
     if draw_box:
@@ -200,7 +200,7 @@ async def async_draw_recognition(image: np.ndarray, result: Dict[str, Any],
             cv2.rectangle(image, (x1, y1), (x2, y2), color, 1)
 
     # yield to other tasks
-    await asyncio.sleep(0)
+    # await asyncio.sleep(0)
 
     # place text at the center
     if draw_text:
@@ -261,11 +261,16 @@ def bitmap_to_polygon(bitmap):
 def main():
     image = cv2.imread('demo/demo.jpg')
     result = get_recognition(image)
-    image = draw_recognition(image, result, draw_contour=True, 
-                             draw_mask=True, draw_box=False, 
-                             draw_text=True, draw_score=False, alpha=0.45)
-    cv2.imshow('result', image)
-    cv2.waitKey(0)
+    print(result.keys())
+    for key in result.keys():
+        print(key, type(result[key]))
+        if isinstance(result[key], list):
+            print('---', len(result[key]), type(result[key][0]))
+            if isinstance(result[key][0], list):
+                print('------', len(result[key][0]), type(result[key][0][0]))
+                if isinstance(result[key][0][0], list):
+                    print('---------', len(result[key][0][0]), type(result[key][0][0][0]))
+
 
 if __name__ == '__main__':
     main()
