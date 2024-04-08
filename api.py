@@ -139,6 +139,7 @@ async def async_get_recognition(image: np.ndarray,
 def async_draw_recognition(image: np.ndarray, result: Dict[str, Any],
                      black: bool = False, draw_contour: bool = False, draw_mask: bool = True, 
                      draw_box: bool = False, draw_text: bool = True, draw_score = True,
+                     draw_center = False,
                      alpha: float = 0.45) -> np.ndarray:
     masks = result['masks']
     mask_contours = result['mask_contours']
@@ -217,6 +218,14 @@ def async_draw_recognition(image: np.ndarray, result: Dict[str, Any],
             if draw_score:
                 text += f' {scores[i]:.2f}'
             cv2.putText(image, text, center, cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 255), 2)
+
+    # draw center with a green circle, and center of bounding box with a yellow circle
+    if draw_center:
+        for i, center in enumerate(geometry_center):
+            cv2.circle(image, tuple(center), 3, (0, 255, 0), -1)
+            x1, y1, x2, y2 = boxes[i]
+            center_box = ((x1+x2)//2, (y1+y2)//2)
+            cv2.circle(image, center_box, 3, (0, 255, 255), -1)
     
     return image
 
