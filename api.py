@@ -1,6 +1,5 @@
 import cv2
 import numpy as np
-from mmengine.utils import track_iter_progress
 
 from mmdet.apis import inference_detector, init_detector
 
@@ -123,6 +122,7 @@ def get_recognition(image: np.ndarray,
     }
 
     if filter_objects:
+        # filter the objects
         result = get_filtered_objects(result, filter_objects)
 
     return result

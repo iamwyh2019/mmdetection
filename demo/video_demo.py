@@ -60,20 +60,20 @@ def main():
         
     for frame in track_iter_progress((video_reader, len(video_reader)), task_name="frame"):
         result = inference_detector(model, frame)
-        visualizer.add_datasample(
-            name='video',
-            image=frame,
-            data_sample=result,
-            draw_gt=False,
-            show=False,
-            pred_score_thr=args.score_thr)
-        frame = visualizer.get_image()
+        # visualizer.add_datasample(
+        #     name='video',
+        #     image=frame,
+        #     data_sample=result,
+        #     draw_gt=False,
+        #     show=False,
+        #     pred_score_thr=args.score_thr)
+        # frame = visualizer.get_image()
 
-        if args.show:
-            cv2.namedWindow('video', 0)
-            mmcv.imshow(frame, 'video', args.wait_time)
-        if args.out:
-            video_writer.write(frame)
+        # if args.show:
+        #     cv2.namedWindow('video', 0)
+        #     mmcv.imshow(frame, 'video', args.wait_time)
+        # if args.out:
+        #     video_writer.write(frame)
 
     if video_writer:
         video_writer.release()

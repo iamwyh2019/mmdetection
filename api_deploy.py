@@ -1,16 +1,11 @@
 import cv2
 import numpy as np
-from mmengine.utils import track_iter_progress
-
-from mmdet.apis import inference_detector, init_detector
-
 import asyncio
 from concurrent.futures import ThreadPoolExecutor
 
 from typing import List, Dict, Callable, Any, Union, Tuple
-from mmdet.structures import DetDataSample
 import os
-
+import time
 from mmdeploy_runtime import Detector
 
 # tiny, s, l
@@ -59,7 +54,7 @@ CLASSES = METAINFO['classes']
 COLORS = METAINFO['palette']
 
 detector = Detector(
-    model_path=os.path.join('sdk', f'rtmdet-{model_size}-sdk'),
+    model_path=os.path.join(os.path.dirname(__file__), 'sdk', f'rtmdet-{model_size}-sdk'),
     device_name='cuda',
     device_id=0
 )
