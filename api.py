@@ -25,6 +25,17 @@ COLORS = model.dataset_meta['palette']
 
 executor = ThreadPoolExecutor(max_workers = 30)
 
+def get_geometric_center(masks: torch.Tensor) -> List[List[int]]:
+    N, H, W = masks.shape
+
+    x = torch.arange(W, device=masks.device).view(1, 1, W).expand(N, H, W)
+    y = torch.arange(H, device=masks.device).view(1, H, 1).expand(N, H, W)
+
+    x = (x * masks).sum(dim=(1, 2)) / masks.sum(dim=(1, 2))
+    y = (y * masks).sum(dim=(1, 2)) / masks.sum(dim=(1, 2))
+
+    return torch.stack([x, y], dim=1).cpu().numpy().astype(int).tolist()
+
 def parse_result(result: DetDataSample,
                  score_threshold: float = 0.15,
                  top_k: int = 15) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
@@ -43,16 +54,16 @@ def parse_result(result: DetDataSample,
     # get the top_k
     pred_instances = pred_instances[:top_k]
 
+    # get the geometric centers
+    centers = get_geometric_center(pred_instances.masks)
+
     # convert to numpy
-    boxes: np.ndarray = pred_instances.bboxes.cpu().numpy()
+    boxes: np.ndarray = pred_instances.bboxes.to(torch.int32).cpu().numpy()
     labels: np.ndarray = pred_instances.labels.cpu().numpy()
     scores: np.ndarray = pred_instances.scores.cpu().numpy()
-    masks: np.ndarray = pred_instances.masks.cpu().numpy()
+    masks: np.ndarray = pred_instances.masks.to(torch.uint8).cpu().numpy()
 
-    # boxes need to be rounded
-    boxes = np.round(boxes).astype(np.int32)
-
-    return masks, boxes, labels, scores
+    return masks, boxes, labels, scores, centers
 
 
 def process_image(image:np.ndarray,
@@ -64,41 +75,33 @@ def process_image(image:np.ndarray,
     # inference
     if stats:
         stats.start_event('inference')
+
     result = inference_detector(model, image)
+
     if stats:
         stats.end_event('inference')
         stats.start_event('parse')
-    masks, boxes, labels, scores = parse_result(result, score_threshold, top_k)
-    masks = masks.astype(np.uint8)
+    masks, boxes, labels, scores, geometry_center = parse_result(result, score_threshold, top_k)
+    
     if stats:
         stats.end_event('parse')
         stats.start_event('draw_contour')
 
     # get contours and geometry centers
-    mask_contours = []
-    geometry_center = []
-    for mask in masks:
+    mask_contours = [None for _ in range(len(masks))]
+    for i, mask in enumerate(masks):
+        # crop the mask by box
+        x1, y1, x2, y2 = boxes[i]
+        mask = mask[y1:y2, x1:x2]
+
         contours, hole = bitmap_to_polygon(mask)
         # find the largest contour
         contours.sort(key=lambda x: len(x), reverse=True)
         largest_contour = max(contours, key = cv2.contourArea)
-        mask_contours.append(largest_contour)
-
-        # mask_crop is 0/1 matrix
-        # the center is the center of mass (assume uniform density)
-        # the contour is the largest contour
-        center = cv2.moments(mask)
-        center_x = int(center["m10"] / center["m00"])
-        center_y = int(center["m01"] / center["m00"])
-        geometry_center.append([center_x, center_y])
+        mask_contours[i] = largest_contour
 
     if stats:
         stats.end_event('draw_contour')
-
-    # # crop the mask by box
-    # for i, box in enumerate(boxes):
-    #     x1, y1, x2, y2 = box
-    #     masks[i] = masks[i][y1:y2, x1:x2]
 
     return masks, mask_contours, boxes, labels, scores, geometry_center
 
@@ -218,6 +221,9 @@ def async_draw_recognition(image: np.ndarray, result: Dict[str, Any],
     # draw the contours
     if draw_contour:
         for i, contour in enumerate(mask_contours):
+            # contour is relative to the box, need to add the box's top-left corner
+            x1, y1, _, _ = boxes[i]
+            contour = np.array(contour) + np.array([x1, y1])
             contour = np.array(contour, dtype=np.int32)
             color = color_list[i]
             cv2.drawContours(image, [contour], -1, color, 2)
