@@ -9,12 +9,13 @@ from concurrent.futures import ThreadPoolExecutor
 from typing import List, Dict, Callable, Any, Union, Tuple
 from mmdet.structures import DetDataSample
 import os
+import torch
 
 model_name = 'rtmdet-ins_l_8xb32-300e_coco'
 
 config_path = os.path.join(os.path.dirname(__file__), f'configs/rtmdet/{model_name}.py')
 checkpoint_path = os.path.join(os.path.dirname(__file__), f'checkpoints/{model_name}.pth')
-device = 'cuda:0'
+device = torch.device('cuda:0')
 
 # build the model from a config file and a checkpoint file
 model = init_detector(config_path, checkpoint_path, device=device)
@@ -56,13 +57,22 @@ def parse_result(result: DetDataSample,
 
 def process_image(image:np.ndarray,
                   score_threshold: float = 0.3,
-                  top_k: int = 15) -> Tuple[np.ndarray, List[np.ndarray], np.ndarray, np.ndarray, np.ndarray, List[List[int]]]:
+                  top_k: int = 15,
+                  stats = None) -> Tuple[np.ndarray, List[np.ndarray], np.ndarray, np.ndarray, np.ndarray, List[List[int]]]:
     global model
 
     # inference
+    if stats:
+        stats.start_event('inference')
     result = inference_detector(model, image)
+    if stats:
+        stats.end_event('inference')
+        stats.start_event('parse')
     masks, boxes, labels, scores = parse_result(result, score_threshold, top_k)
     masks = masks.astype(np.uint8)
+    if stats:
+        stats.end_event('parse')
+        stats.start_event('draw_contour')
 
     # get contours and geometry centers
     mask_contours = []
@@ -82,6 +92,9 @@ def process_image(image:np.ndarray,
         center_y = int(center["m01"] / center["m00"])
         geometry_center.append([center_x, center_y])
 
+    if stats:
+        stats.end_event('draw_contour')
+
     # # crop the mask by box
     # for i, box in enumerate(boxes):
     #     x1, y1, x2, y2 = box
@@ -93,10 +106,16 @@ def process_image(image:np.ndarray,
 def get_recognition(image: np.ndarray,
                     filter_objects: List[str] = [],
                     score_threshold: float = 0.3,
-                    top_k: int = 15) -> Dict[str, Any]:
+                    top_k: int = 15,
+                    stats = None) -> Dict[str, Any]:
     global CLASSES, COLORS
 
-    masks, mask_contours, boxes, labels, scores, geometry_center = process_image(image, score_threshold, top_k)
+    masks, mask_contours, boxes, labels, scores, geometry_center = process_image(
+        image,
+        score_threshold,
+        top_k,
+        stats
+    )
 
     mask_contours = [contour.tolist() for contour in mask_contours]
     boxes = boxes.tolist()
@@ -122,8 +141,12 @@ def get_recognition(image: np.ndarray,
     }
 
     if filter_objects:
+        if stats:
+            stats.start_event('filter')
         # filter the objects
         result = get_filtered_objects(result, filter_objects)
+        if stats:
+            stats.end_event('filter')
 
     return result
 
@@ -131,9 +154,10 @@ def get_recognition(image: np.ndarray,
 async def async_get_recognition(image: np.ndarray,
                                 filter_objects: List[str] = [],
                                 score_threshold: float = 0.3,
-                                top_k: int = 15) -> Dict[str, Any]:
+                                top_k: int = 15,
+                                stats = None) -> Dict[str, Any]:
     loop = asyncio.get_event_loop()
-    return await loop.run_in_executor(executor, get_recognition, image, filter_objects, score_threshold, top_k)
+    return await loop.run_in_executor(executor, get_recognition, image, filter_objects, score_threshold, top_k, stats)
 
 
 def async_draw_recognition(image: np.ndarray, result: Dict[str, Any],
