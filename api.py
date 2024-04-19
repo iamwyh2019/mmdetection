@@ -292,7 +292,7 @@ def bitmap_to_polygon(bitmap):
     #   boundaries of the holes. If there is another contour inside a hole
     #   of a connected component, it is still put at the top level.
     # cv2.CHAIN_APPROX_NONE: stores absolutely all the contour points.
-    outs = cv2.findContours(bitmap, cv2.RETR_CCOMP, cv2.CHAIN_APPROX_NONE)
+    outs = cv2.findContours(bitmap, cv2.RETR_CCOMP, cv2.CHAIN_APPROX_SIMPLE)
     contours = outs[-2]
     hierarchy = outs[-1]
     if hierarchy is None:
