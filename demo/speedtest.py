@@ -45,7 +45,7 @@ def main():
 
     last_print = time.time()
 
-    img = cv2.imread(os.path.join(os.path.dirname(__file__), 'demo_640_360.jpg'))
+    img = cv2.imread(os.path.join(os.path.dirname(__file__), 'demo_424_240.jpg'))
     print("Resolution: ", img.shape)
 
     while True:
