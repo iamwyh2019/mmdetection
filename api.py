@@ -2,7 +2,7 @@ import cv2
 import numpy as np
 
 from mmdet.apis import inference_detector, init_detector
-
+import time
 import asyncio
 from concurrent.futures import ThreadPoolExecutor
 
@@ -66,42 +66,68 @@ def parse_result(result: DetDataSample,
     return masks, boxes, labels, scores, centers
 
 
+count = 0
+total_used_time = 0
+
 def process_image(image:np.ndarray,
                   score_threshold: float = 0.3,
-                  top_k: int = 15,
-                  stats = None) -> Tuple[np.ndarray, List[np.ndarray], np.ndarray, np.ndarray, np.ndarray, List[List[int]]]:
+                  top_k: int = 15) -> Tuple[np.ndarray, List[np.ndarray], np.ndarray, np.ndarray, np.ndarray, List[List[int]]]:
     global model
+    global count, total_used_time
 
-    # inference
-    if stats:
-        stats.start_event('inference')
-
+    start_time = time.time()
     result = inference_detector(model, image)
+    used_time = time.time() - start_time
+    total_used_time += used_time
+    count += 1
 
-    if stats:
-        stats.end_event('inference')
-        stats.start_event('parse')
+    if count > 30:
+        latency = total_used_time / count
+        print(f'latency: {latency:.3f}s ({1/latency:.3f} fps)')
+        count = 0
+        total_used_time = 0
+
     masks, boxes, labels, scores, geometry_center = parse_result(result, score_threshold, top_k)
-    
-    if stats:
-        stats.end_event('parse')
-        stats.start_event('draw_contour')
 
     # get contours and geometry centers
     mask_contours = [None for _ in range(len(masks))]
     for i, mask in enumerate(masks):
-        # crop the mask by box
+        # crop the mask by box plus padding of 5 pixels
         x1, y1, x2, y2 = boxes[i]
-        mask = mask[y1:y2, x1:x2]
+        # x1 = max(0, x1 - 5)
+        # y1 = max(0, y1 - 5)
+        # x2 = min(image.shape[1], x2 + 5)
+        # y2 = min(image.shape[0], y2 + 5)
+        mask_crop = mask[y1:y2, x1:x2]
 
-        contours, hole = bitmap_to_polygon(mask)
+        if mask_crop.size == 0:
+            print('mask_crop size is 0', i, CLASSES[labels[i]])
+            print('boxes[i]', boxes[i])
+            print('mask.shape', mask.shape)
+            print('mask_crop.shape', mask_crop.shape)
+            cv2.imwrite('bad_image.png', image)
+        if mask_crop.max() == 0:
+            nonzero = np.nonzero(mask)
+            if len(nonzero) == 0:
+                print('no nonzero', i, CLASSES[labels[i]])
+            x1 = min(nonzero[1])
+            x2 = max(nonzero[1])
+            y1 = min(nonzero[0])
+            y2 = max(nonzero[0])
+            mask_crop = mask[y1:y2, x1:x2]
+            boxes[i] = [x1, y1, x2, y2]
+
+        contours = bitmap_to_polygon(mask_crop)
+
         # find the largest contour
         contours.sort(key=lambda x: len(x), reverse=True)
         largest_contour = max(contours, key = cv2.contourArea)
-        mask_contours[i] = largest_contour
 
-    if stats:
-        stats.end_event('draw_contour')
+        # convert the contour to be relative to the top-left corner of the box
+        # largest_contour = largest_contour + np.array([x1, y1])
+        # largest_contour = largest_contour - np.array([boxes[i][0], boxes[i][1]])
+
+        mask_contours[i] = largest_contour
 
     return masks, mask_contours, boxes, labels, scores, geometry_center
 
@@ -109,15 +135,13 @@ def process_image(image:np.ndarray,
 def get_recognition(image: np.ndarray,
                     filter_objects: List[str] = [],
                     score_threshold: float = 0.3,
-                    top_k: int = 15,
-                    stats = None) -> Dict[str, Any]:
+                    top_k: int = 15) -> Dict[str, Any]:
     global CLASSES, COLORS
 
     masks, mask_contours, boxes, labels, scores, geometry_center = process_image(
         image,
         score_threshold,
         top_k,
-        stats
     )
 
     mask_contours = [contour.tolist() for contour in mask_contours]
@@ -144,12 +168,7 @@ def get_recognition(image: np.ndarray,
     }
 
     if filter_objects:
-        if stats:
-            stats.start_event('filter')
-        # filter the objects
         result = get_filtered_objects(result, filter_objects)
-        if stats:
-            stats.end_event('filter')
 
     return result
 
@@ -157,10 +176,9 @@ def get_recognition(image: np.ndarray,
 async def async_get_recognition(image: np.ndarray,
                                 filter_objects: List[str] = [],
                                 score_threshold: float = 0.3,
-                                top_k: int = 15,
-                                stats = None) -> Dict[str, Any]:
+                                top_k: int = 15) -> Dict[str, Any]:
     loop = asyncio.get_event_loop()
-    return await loop.run_in_executor(executor, get_recognition, image, filter_objects, score_threshold, top_k, stats)
+    return await loop.run_in_executor(executor, get_recognition, image, filter_objects, score_threshold, top_k)
 
 
 def async_draw_recognition(image: np.ndarray, result: Dict[str, Any],
@@ -226,7 +244,7 @@ def async_draw_recognition(image: np.ndarray, result: Dict[str, Any],
             contour = np.array(contour) + np.array([x1, y1])
             contour = np.array(contour, dtype=np.int32)
             color = color_list[i]
-            cv2.drawContours(image, [contour], -1, color, 2)
+            cv2.drawContours(image, [contour], -1, color, 1)
 
     # yield to other tasks
     # await asyncio.sleep(0)
@@ -286,32 +304,62 @@ def bitmap_to_polygon(bitmap):
         list[ndarray]: the converted mask in polygon representation.
         bool: whether the mask has holes.
     """
-    # cv2.RETR_CCOMP: retrieves all of the contours and organizes them
-    #   into a two-level hierarchy. At the top level, there are external
-    #   boundaries of the components. At the second level, there are
-    #   boundaries of the holes. If there is another contour inside a hole
-    #   of a connected component, it is still put at the top level.
-    # cv2.CHAIN_APPROX_NONE: stores absolutely all the contour points.
-    outs = cv2.findContours(bitmap, cv2.RETR_CCOMP, cv2.CHAIN_APPROX_SIMPLE)
+    outs = cv2.findContours(bitmap, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
     contours = outs[-2]
-    hierarchy = outs[-1]
-    if hierarchy is None:
-        return [], False
-    # hierarchy[i]: 4 elements, for the indexes of next, previous,
-    # parent, or nested contours. If there is no corresponding contour,
-    # it will be -1.
-    with_hole = (hierarchy.reshape(-1, 4)[:, 3] >= 0).any()
     contours = [c.reshape(-1, 2) for c in contours]
-    return contours, with_hole
+    return contours
 
 
 def main():
-    image = cv2.imread('demo/large_image.jpg')
+    capture = cv2.VideoCapture(0)
+    # set resolution to 640x360
+    capture.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
+    capture.set(cv2.CAP_PROP_FRAME_HEIGHT, 360)
 
-    result = get_recognition(image)
-    image = async_draw_recognition(image, result, draw_contour=True, draw_text=True, draw_score=True)
-    cv2.imshow('result', image)
-    cv2.waitKey(0)
+    print("Resolution:", capture.get(cv2.CAP_PROP_FRAME_WIDTH), "x", capture.get(cv2.CAP_PROP_FRAME_HEIGHT))
+
+    count = 0
+    total_used_time = 0
+
+    while True:
+        ret, image = capture.read()
+        if not ret:
+            break
+
+        # plot image
+        cv2.imshow('image', image)
+        if cv2.waitKey(1) & 0xFF == ord('q'):
+            break
+
+        start_time = time.time()
+        result = get_recognition(image, score_threshold=0.5)
+        used_time = time.time() - start_time
+        total_used_time += used_time
+        count += 1
+
+        if count > 30:
+            latency = total_used_time / count
+            print(f'latency: {latency:.3f}s ({1/latency:.3f} fps)')
+            count = 0
+            total_used_time = 0
+
+    # image = async_draw_recognition(image, result, draw_contour=True, draw_text=True, draw_score=True)
+    # cv2.imshow('result', image)
+    # cv2.waitKey(0)
+
+    # bad_image = cv2.imread('bad_image.png')
+    # print(bad_image.shape, bad_image.dtype)
+
+    # result = inference_detector(model, bad_image)
+    # ins = result.pred_instances
+    # ins = ins[ins.scores >= 0.3]
+    # boxes: np.ndarray = ins.bboxes.to(torch.int32).cpu().numpy()
+    # labels: np.ndarray = ins.labels.cpu().numpy()
+    # scores: np.ndarray = ins.scores.cpu().numpy()
+    # masks: np.ndarray = ins.masks.to(torch.uint8).cpu().numpy()
+
+    # for i, mask in enumerate(masks):
+    #     print(i, CLASSES[labels[i]], mask.shape, boxes[i], scores[i])
 
 if __name__ == '__main__':
     main()
